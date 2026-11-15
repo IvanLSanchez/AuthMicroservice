@@ -1,5 +1,6 @@
 """Rutas de autenticación: login, refresh, logout y me."""
 
+import math
 from datetime import datetime, timezone
 
 import jwt
@@ -17,6 +18,7 @@ from app.schemas import (
     TokenResponse,
     UsuarioMe,
 )
+from app.services.limitador import limitador
 from app.services.security import (
     create_access_token,
     decode_access_token,
@@ -41,12 +43,28 @@ _bearer = HTTPBearer(auto_error=False)
     summary="Autenticar usuario",
 )
 async def login(datos: LoginRequest, db: Session = Depends(get_db)):
+    # Antes de tocar la base ni verificar la contraseña: bloqueado es bloqueado, aunque acierte.
+    espera = limitador.segundos_de_espera(datos.email)
+    if espera:
+        minutos = math.ceil(espera / 60)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                "Demasiados intentos fallidos. Probá de nuevo en "
+                f"{minutos} {'minuto' if minutos == 1 else 'minutos'}."
+            ),
+            headers={"Retry-After": str(espera)},
+        )
+
     usuario = db.query(Usuario).filter(Usuario.email == datos.email).first()
     if usuario is None or not verify_password(datos.password, usuario.password_hash):
+        # También cuenta un email inexistente, con la misma respuesta: no revela qué cuentas hay.
+        limitador.registrar_fallo(datos.email)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credenciales inválidas",
         )
+    limitador.reiniciar(datos.email)
     if not usuario.activo:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

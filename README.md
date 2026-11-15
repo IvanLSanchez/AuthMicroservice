@@ -27,8 +27,20 @@ cp .env.example .env
 | `JWT_ALGORITHM` | Algoritmo del JWT | `HS256` |
 | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | Vida del access token (minutos) | `15` (por defecto) |
 | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | Vida del refresh token (días) | `7` |
+| `LOGIN_MAX_INTENTOS` | Fallos de login seguidos (por email) tras los cuales se bloquea | `5` (por defecto) |
+| `LOGIN_VENTANA_MINUTOS` | Dentro de cuántos minutos se cuentan esos fallos | `5` (por defecto) |
+| `LOGIN_BLOQUEO_MINUTOS` | Cuánto hay que esperar antes de volver a intentar | `5` (por defecto) |
 | `FRONTEND_LIST` | Orígenes permitidos para CORS | `["http://localhost:5173"]` |
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | (Opcional) Crea un ADMIN al arrancar si no existe | `admin@example.com` / `...` |
+
+### Límite de intentos de login
+
+Frena la fuerza bruta contra una cuenta ([`app/services/limitador.py`](app/services/limitador.py)):
+
+- Se cuenta **por email** (no por IP: detrás del orquestador todos llegan desde la IP del gateway, y un límite por IP dejaría afuera a todos por culpa de uno). Un email que no existe también cuenta y recibe la misma respuesta, para no revelar qué cuentas hay.
+- Con el email bloqueado, ni la contraseña correcta entra. Insistir **no** extiende la espera. Un login correcto borra los fallos.
+- El estado vive en la memoria del proceso: con varias réplicas cada una cuenta por su lado, y un reinicio lo borra.
+- Contrapartida: alguien que sepa el email de otro puede bloquearlo 5 minutos a propósito.
 
 ## Modelo de datos (schema `auth`)
 
@@ -40,7 +52,7 @@ cp .env.example .env
 
 | Método | Ruta | Descripción | Acceso |
 |--------|------|-------------|--------|
-| `POST` | `/auth/login` | Autentica con email+password → `access_token` + `refresh_token` | público |
+| `POST` | `/auth/login` | Autentica con email+password → `access_token` + `refresh_token`. Tras **5 fallos seguidos** del mismo email responde `429` con `Retry-After` (300 s) durante 5 minutos, aunque la contraseña sea correcta | público |
 | `POST` | `/auth/refresh` | Rota el refresh token y emite un access token nuevo. Falla (`401`) si el usuario fue desactivado | público |
 | `POST` | `/auth/logout` | Revoca refresh token y pone el access token en blacklist | autenticado |
 | `GET` | `/auth/me` | Devuelve el usuario autenticado | autenticado |

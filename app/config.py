@@ -35,6 +35,11 @@ class Settings:
     refresh_token_expire: timedelta
     seed_admin_email: str
     seed_admin_password: str
+    # Límite de intentos de login por email: tras `login_max_intentos` fallos dentro de la ventana,
+    # hay que esperar `login_bloqueo_segundos` antes de volver a probar.
+    login_max_intentos: int = 5
+    login_ventana_segundos: int = 300
+    login_bloqueo_segundos: int = 300
 
 
 settings = Settings(
@@ -54,6 +59,9 @@ settings = Settings(
     ),
     seed_admin_email=os.getenv("SEED_ADMIN_EMAIL", ""),
     seed_admin_password=os.getenv("SEED_ADMIN_PASSWORD", ""),
+    login_max_intentos=max(1, _parse_int(os.getenv("LOGIN_MAX_INTENTOS"), 5)),
+    login_ventana_segundos=60 * max(1, _parse_int(os.getenv("LOGIN_VENTANA_MINUTOS"), 5)),
+    login_bloqueo_segundos=60 * max(1, _parse_int(os.getenv("LOGIN_BLOQUEO_MINUTOS"), 5)),
 )
 
 
