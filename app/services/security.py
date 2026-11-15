@@ -27,15 +27,17 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def create_access_token(usuario_id: str, rol: str) -> tuple[str, str]:
+def create_access_token(usuario_id: str, rol: str, email: str) -> tuple[str, str]:
     """Crea un access token y devuelve ``(token, jti)``.
 
     El ``jti`` identifica de forma única el token para poder revocarlo en logout.
+    El ``email`` permite a quien valida el token saber quién operó sin consultar a auth.
     """
     jti = str(uuid.uuid4())
     ahora = datetime.now(timezone.utc)
     payload = {
         "sub": str(usuario_id),
+        "email": email,
         "rol": rol,
         "jti": jti,
         "iat": ahora,

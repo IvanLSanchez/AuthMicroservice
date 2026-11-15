@@ -8,7 +8,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.model import JwtBlacklist, RefreshToken
+from app.model import JwtBlacklist, RefreshToken, Usuario
 from app.services.security import utcnow
 
 
@@ -33,11 +33,11 @@ def create_refresh_token(db: Session, usuario_id) -> str:
     return token
 
 
-def rotate_refresh_token(db: Session, token: str) -> str | None:
+def rotate_refresh_token(db: Session, token: str) -> tuple[str, Usuario] | None:
     """Rota un refresh token: marca el actual como revocado y emite uno nuevo.
 
-    Devuelve el nuevo token, o ``None`` si el token presentado es inválido,
-    expirado o ya fue revocado.
+    Devuelve ``(nuevo_token, usuario)``, o ``None`` si el token presentado es
+    inválido, expirado, ya fue revocado o el usuario fue desactivado.
     """
     registro = (
         db.query(RefreshToken)
@@ -49,10 +49,26 @@ def rotate_refresh_token(db: Session, token: str) -> str | None:
     if registro.expira_en < utcnow():
         return None
 
+    # Un operador desactivado no puede seguir renovando su sesión.
+    usuario = db.query(Usuario).filter(Usuario.id == registro.usuario_id).first()
+    if usuario is None or not usuario.activo:
+        return None
+
     registro.revocado = True
     db.commit()
 
-    return create_refresh_token(db, registro.usuario_id)
+    return create_refresh_token(db, registro.usuario_id), usuario
+
+
+def revoke_all_refresh_tokens(db: Session, usuario_id) -> int:
+    """Revoca todos los refresh tokens vigentes de un usuario. Devuelve cuántos revocó."""
+    cantidad = (
+        db.query(RefreshToken)
+        .filter(RefreshToken.usuario_id == usuario_id, RefreshToken.revocado.is_(False))
+        .update({"revocado": True}, synchronize_session=False)
+    )
+    db.commit()
+    return cantidad
 
 
 def revoke_refresh_token(db: Session, token: str) -> None:

@@ -1,6 +1,5 @@
 """Rutas de autenticación: login, refresh, logout y me."""
 
-import hashlib
 from datetime import datetime, timezone
 
 import jwt
@@ -10,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user
-from app.model import RefreshToken, Usuario
+from app.model import Usuario
 from app.schemas import (
     LoginRequest,
     LogoutRequest,
@@ -54,7 +53,7 @@ async def login(datos: LoginRequest, db: Session = Depends(get_db)):
             detail="Usuario inactivo",
         )
 
-    access_token, _ = create_access_token(str(usuario.id), usuario.rol)
+    access_token, _ = create_access_token(str(usuario.id), usuario.rol, usuario.email)
     refresh_token = create_refresh_token(db, usuario.id)
 
     usuario.ultimo_login_en = utcnow()
@@ -69,18 +68,15 @@ async def login(datos: LoginRequest, db: Session = Depends(get_db)):
     summary="Renovar access token",
 )
 async def refresh(datos: RefreshRequest, db: Session = Depends(get_db)):
-    nuevo_refresh = rotate_refresh_token(db, datos.refresh_token)
-    if nuevo_refresh is None:
+    rotado = rotate_refresh_token(db, datos.refresh_token)
+    if rotado is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token inválido o expirado",
         )
+    nuevo_refresh, usuario = rotado
 
-    token_hash = hashlib.sha256(nuevo_refresh.encode("utf-8")).hexdigest()
-    registro = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
-    usuario = db.query(Usuario).filter(Usuario.id == registro.usuario_id).first()
-
-    access_token, _ = create_access_token(str(usuario.id), usuario.rol)
+    access_token, _ = create_access_token(str(usuario.id), usuario.rol, usuario.email)
     return TokenResponse(access_token=access_token, refresh_token=nuevo_refresh)
 
 
