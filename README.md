@@ -23,12 +23,24 @@ cp .env.example .env
 |----------|-------------|---------|
 | `DATABASE_URL` | URL de conexión (pooler de Supabase) | `postgresql://user:pass@host:5432/postgres` |
 | `DB_SCHEMA` | Schema donde vive este servicio | `auth` |
-| `JWT_SECRET` | Clave para firmar los JWT (HS256) | `...` |
+| `JWT_SECRET` | **Obligatoria.** Clave para firmar los JWT (HS256), de **32 caracteres o más**. El servicio no arranca si falta, es corta o es la del `.env.example`. El orquestador necesita la misma para validar los tokens | `openssl rand -base64 48` |
 | `JWT_ALGORITHM` | Algoritmo del JWT | `HS256` |
-| `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | Vida del access token (minutos) | `30` |
+| `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | Vida del access token (minutos) | `15` (por defecto) |
 | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | Vida del refresh token (días) | `7` |
+| `LOGIN_MAX_INTENTOS` | Fallos de login seguidos (por email) tras los cuales se bloquea | `5` (por defecto) |
+| `LOGIN_VENTANA_MINUTOS` | Dentro de cuántos minutos se cuentan esos fallos | `5` (por defecto) |
+| `LOGIN_BLOQUEO_MINUTOS` | Cuánto hay que esperar antes de volver a intentar | `5` (por defecto) |
 | `FRONTEND_LIST` | Orígenes permitidos para CORS | `["http://localhost:5173"]` |
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | (Opcional) Crea un ADMIN al arrancar si no existe | `admin@example.com` / `...` |
+
+### Límite de intentos de login
+
+Frena la fuerza bruta contra una cuenta ([`app/services/limitador.py`](app/services/limitador.py)):
+
+- Se cuenta **por email** (no por IP: detrás del orquestador todos llegan desde la IP del gateway, y un límite por IP dejaría afuera a todos por culpa de uno). Un email que no existe también cuenta y recibe la misma respuesta, para no revelar qué cuentas hay.
+- Con el email bloqueado, ni la contraseña correcta entra. Insistir **no** extiende la espera. Un login correcto borra los fallos.
+- El estado vive en la memoria del proceso: con varias réplicas cada una cuenta por su lado, y un reinicio lo borra.
+- Contrapartida: alguien que sepa el email de otro puede bloquearlo 5 minutos a propósito.
 
 ## Modelo de datos (schema `auth`)
 
@@ -40,13 +52,13 @@ cp .env.example .env
 
 | Método | Ruta | Descripción | Acceso |
 |--------|------|-------------|--------|
-| `POST` | `/auth/login` | Autentica con email+password → `access_token` + `refresh_token` | público |
-| `POST` | `/auth/refresh` | Rota el refresh token y emite un access token nuevo | público |
+| `POST` | `/auth/login` | Autentica con email+password → `access_token` + `refresh_token`. Tras **5 fallos seguidos** del mismo email responde `429` con `Retry-After` (300 s) durante 5 minutos, aunque la contraseña sea correcta | público |
+| `POST` | `/auth/refresh` | Rota el refresh token y emite un access token nuevo. Falla (`401`) si el usuario fue desactivado | público |
 | `POST` | `/auth/logout` | Revoca refresh token y pone el access token en blacklist | autenticado |
 | `GET` | `/auth/me` | Devuelve el usuario autenticado | autenticado |
 | `POST` | `/auth/usuarios` | Alta de operador | `ADMIN` |
 | `GET` | `/auth/usuarios` | Lista operadores | `ADMIN` |
-| `PATCH` | `/auth/usuarios/{id}` | Cambia nombre/rol/activo | `ADMIN` |
+| `PATCH` | `/auth/usuarios/{id}` | Cambia nombre/rol/activo. Al desactivar un usuario se **revocan todos sus refresh tokens** | `ADMIN` |
 | `GET` | `/health` | Health check | público |
 
 ## Ejecución local
@@ -69,10 +81,10 @@ pip install -r requirements.txt
 4. Iniciar el servidor:
 
 ```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8086
 ```
 
-La documentación interactiva queda en `http://localhost:8000/docs`.
+El puerto del ecosistema es el **8086** (el 8000 es de leads y el 8001 de ia-resumen). La documentación interactiva queda en `http://localhost:8086/docs`.
 
 ## Ejecución con Docker
 
@@ -81,7 +93,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-La API estará en `http://localhost:8001` (mapeado al puerto 8000 del contenedor).
+La API estará en `http://localhost:8086` (mapeado al puerto 8000 del contenedor).
 
 ## Pruebas
 
@@ -89,8 +101,10 @@ La API estará en `http://localhost:8001` (mapeado al puerto 8000 del contenedor
 pytest
 ```
 
-Cubre: login (ok / contraseña inválida / usuario inexistente), `/auth/me` con y sin token, refresh (rotación y reuso rechazado), logout (blacklist del access token) y control de roles (`ADMIN` vs `ASESOR`).
+Cubre: login (ok / contraseña inválida / usuario inexistente), `/auth/me` con y sin token, refresh (rotación, reuso rechazado y usuario desactivado), logout (blacklist del access token), control de roles (`ADMIN` vs `ASESOR`), revocación de refresh tokens al desactivar un usuario, el claim `email` y la validación del `JWT_SECRET` al arrancar.
 
 ## Integración con el resto de microservicios
 
-El JWT emitido incluye los claims `sub` (id de usuario), `rol` y `jti`. Los demás microservicios (clientes 8082, vehiculos 8083, calificacion 8084, leads 8000) siguen usando `X-Api-Key` entre sí; este servicio deja el JWT listo para que, cuando se integren, validen los tokens emitidos aquí (por ejemplo exponiendo un JWKS). En esta entrega no se modifica ningún otro servicio.
+El JWT emitido incluye los claims `sub` (id de usuario), `email`, `rol` y `jti`.
+
+Quien valida los tokens es el **orquestador** (el API Gateway del ecosistema): los verifica **localmente** con el mismo `JWT_SECRET`, sin llamar a este servicio en cada pedido, y reenvía la identidad a los demás servicios en el header `X-Usuario`. Los demás microservicios (clientes 8082, vehiculos 8083, calificacion 8084, leads 8000) no validan JWT. El logout pasa por el orquestador (`POST /api/auth/logout`), que además invalida ese access token en el acto.

@@ -10,6 +10,7 @@ from app.deps import require_role
 from app.model import RolUsuario, Usuario
 from app.schemas import ActualizarUsuarioDTO, CrearUsuarioDTO, UsuarioDTO
 from app.services.security import hash_password
+from app.services.tokens import revoke_all_refresh_tokens
 
 router = APIRouter(prefix="/auth/usuarios", tags=["Usuarios"])
 
@@ -86,5 +87,8 @@ async def actualizar_usuario(
         usuario.activo = datos.activo
 
     db.commit()
+    if datos.activo is False:
+        # Un operador desactivado no puede renovar su sesión con tokens que ya tenía.
+        revoke_all_refresh_tokens(db, usuario.id)
     db.refresh(usuario)
     return usuario

@@ -1,18 +1,22 @@
+# Versiones exactas: la última estable con al menos 3 días desde su publicación
+# (verificado en PyPI el 2026-11-15; si la última tiene menos de 3 días se usa la anterior).
+# Las dependencias transitivas no están fijadas.
+
 #---config---#
-fastapi
-uvicorn[standard]
-python-dotenv
-pydantic
-pydantic[email]
+fastapi==0.162.5
+uvicorn[standard]==0.54.0
+python-dotenv==1.2.4
+pydantic[email]==2.14.3
+email-validator==2.3.0
 
 #---auth---#
-PyJWT
-bcrypt
+PyJWT==2.15.1
+bcrypt==5.0.0
 
 #---database---#
-SQLAlchemy>=2.0,<3
-psycopg[binary]
+SQLAlchemy==2.1.8
+psycopg[binary]==3.3.8
 
 #---tests---#
-pytest
-httpx
+pytest==9.2.0
+httpx==0.28.1
