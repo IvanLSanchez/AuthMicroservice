@@ -1,0 +1,10 @@
+# AuthMicroservice: solo API + DB. No levanta Postgres ni Kafka (usa Supabase).
+services:
+  auth:
+    build: .
+    container_name: auth_service
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8001:8000"
