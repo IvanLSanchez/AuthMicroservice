@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings, validar_configuracion
-from app.database import Base, SessionLocal, engine
+from app.database import Base, SessionLocal, create_schema, engine
 from app.model import JwtBlacklist, RefreshToken, Usuario  # noqa: F401
 from app.routers import auth_router, usuarios_router
 from app.services.security import hash_password
@@ -49,6 +49,7 @@ def _seed_admin() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validar_configuracion()  # no arranca con un JWT_SECRET vacío, corto o de ejemplo
+    create_schema()
     Base.metadata.create_all(bind=engine)
     _seed_admin()
     yield

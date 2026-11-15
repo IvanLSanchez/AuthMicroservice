@@ -37,6 +37,23 @@ SessionLocal = sessionmaker(autoflush=False, bind=engine)
 Base = declarative_base()
 
 
+def create_schema() -> None:
+    """Crea el schema de este servicio si no existe (PostgreSQL únicamente)."""
+    if _IS_SQLITE:
+        return
+    from sqlalchemy import text
+
+    # ``settings.db_schema`` es un nombre de entorno controlado, no entrada del
+    # usuario final; se valida para no dejar espacio a inyección vía la variable.
+    schema = settings.db_schema
+    if not schema.replace("_", "").isalnum():
+        raise ValueError(f"DB_SCHEMA inválido: {schema!r}")
+
+    with engine.connect() as conn:
+        conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
+        conn.commit()
+
+
 def get_db():
     db = SessionLocal()
     try:
